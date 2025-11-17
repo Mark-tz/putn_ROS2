@@ -33,8 +33,9 @@
 #ifndef Q_MOC_RUN  // See: https://bugreports.qt-project.org/browse/QTBUG-22829
 # include <QObject>
 
-# include <ros/ros.h>
-
+# include <rclcpp/rclcpp.hpp>
+# include <geometry_msgs/msg/pose_stamped.hpp>
+# include "rviz_common/properties/string_property.hpp"
 # include "pose_tool.h"
 #endif
 
@@ -42,7 +43,6 @@ namespace rviz
 {
 class Arrow;
 class DisplayContext;
-class StringProperty;
 
 class Goal3DTool: public Pose3DTool
 {
@@ -59,10 +59,9 @@ private Q_SLOTS:
   void updateTopic();
 
 private:
-  ros::NodeHandle nh_;
-  ros::Publisher pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_;
 
-  StringProperty* topic_property_;
+  rviz_common::properties::StringProperty* topic_property_;
 };
 
 }

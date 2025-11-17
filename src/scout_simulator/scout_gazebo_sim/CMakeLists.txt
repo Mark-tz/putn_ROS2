@@ -1,47 +1,29 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(scout_gazebo_sim)
 
-add_compile_options(-std=c++11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(catkin REQUIRED COMPONENTS    
-    roslaunch 
-    roslint 
-    roscpp 
-    std_msgs
-    sensor_msgs
-    geometry_msgs
-    tf2 
-    tf2_ros
-)
-catkin_package(
-  INCLUDE_DIRS include
-#   LIBRARIES 
-  CATKIN_DEPENDS roscpp sensor_msgs
-#   DEPENDS Boost
-)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
-###########
-## Build ##
-###########
-
-include_directories(
-    include
-    ${catkin_INCLUDE_DIRS}
-)
+include_directories(include)
 
 add_library(scout_gazebo STATIC src/scout_skid_steer.cpp)
-target_link_libraries(scout_gazebo ${catkin_LIBRARIES})
+ament_target_dependencies(scout_gazebo rclcpp geometry_msgs std_msgs)
 
 add_executable(scout_skid_steer_controller src/scout_skid_steer_controller.cpp)
-target_link_libraries(scout_skid_steer_controller scout_gazebo ${catkin_LIBRARIES})
+ament_target_dependencies(scout_skid_steer_controller rclcpp geometry_msgs std_msgs)
+target_link_libraries(scout_skid_steer_controller scout_gazebo)
 
-#############
-## Install ##
-#############
+install(TARGETS scout_gazebo scout_skid_steer_controller
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME})
 
-roslaunch_add_file_check(launch)
+install(DIRECTORY launch worlds
+  DESTINATION share/${PROJECT_NAME})
 
-install(
-  DIRECTORY launch worlds
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-)
+ament_package()

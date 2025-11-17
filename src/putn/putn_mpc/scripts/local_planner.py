@@ -1,19 +1,20 @@
-#!/usr/bin/env python
-import rospy
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
 from std_msgs.msg import Bool, Float64, Float32MultiArray
 from geometry_msgs.msg import Pose, PoseArray, PoseStamped, Point, Twist
 from nav_msgs.msg import Path, Odometry, OccupancyGrid
 import numpy as np
-import tf
 from MPC import MPC
 from sensor_msgs.msg import LaserScan
-from visualization_msgs.msg import Marker,MarkerArray
-from std_srvs.srv import SetBool
+from visualization_msgs.msg import Marker, MarkerArray
 
 
-class Local_Planner():
+class Local_Planner(Node):
     def __init__(self):
-        self.replan_period = rospy.get_param('/local_planner/replan_period', 0.01)
+        super().__init__('local_planner')
+        self.declare_parameter('replan_period', 0.01)
+        self.replan_period = float(self.get_parameter('replan_period').value)
         self.curr_state = np.zeros(5)
         self.z = 0
         self.N = 10
@@ -32,17 +33,16 @@ class Local_Planner():
         self.ob=[]
         self.is_end=0
         self.ob_total = []
-        self.__timer_replan = rospy.Timer(rospy.Duration(self.replan_period), self.__replan_cb)
-        self.__sub_curr_state = rospy.Subscriber('/curr_state', Float32MultiArray, self.__curr_pose_cb, queue_size=10)
-        self.__sub_obs = rospy.Subscriber('/obs', Float32MultiArray, self.__obs_cb, queue_size=10)
-        self.__sub_goal_state = rospy.Subscriber('/surf_predict_pub', Float32MultiArray, self._global_path_callback2, queue_size=10)
-        self.__pub_local_path = rospy.Publisher('/local_path', Path, queue_size=10)
-        self.__pub_local_plan = rospy.Publisher('/local_plan', Float32MultiArray, queue_size=10)
+        self.__timer_replan = self.create_timer(self.replan_period, self.__replan_cb)
+        self.__sub_curr_state = self.create_subscription(Float32MultiArray, '/curr_state', self.__curr_pose_cb, 10)
+        self.__sub_obs = self.create_subscription(Float32MultiArray, '/obs', self.__obs_cb, 10)
+        self.__sub_goal_state = self.create_subscription(Float32MultiArray, '/surf_predict_pub', self._global_path_callback2, 10)
+        self.__pub_local_path = self.create_publisher(Path, '/local_path', 10)
+        self.__pub_local_plan = self.create_publisher(Float32MultiArray, '/local_plan', 10)
         self.control_cmd = Twist()
-        self.listener = tf.TransformListener()
         self.times = 0
         self.obstacle_markerarray = MarkerArray()
-        self.ob_pub = rospy.Publisher('/ob_draw', MarkerArray, queue_size=10)
+        self.ob_pub = self.create_publisher(MarkerArray, '/ob_draw', 10)
         
 
     def distance_sqaure(self,c1,c2):
@@ -87,24 +87,23 @@ class Local_Planner():
     def __obs_cb(self, data):
         self.ob = []
         if(len(data.data)!=0):
-
-            size = len(data.data)/3
+            size = len(data.data)//3
             for i in range(size):
                 self.ob.append(( (data.data[3*i]//0.3)*0.3, (data.data[3*i+1]//0.3)*0.3) )
             dic = list(set([tuple(t) for t in self.ob]))
             self.ob = [list(v) for v in dic]
             self.draw_ob()
 
-    def __replan_cb(self, event):
+    def __replan_cb(self):
         if self.robot_state_set and self.ref_path_set:
             target = []
             self.choose_goal_state()        ##  gobal planning
             dist = 1
             goal = np.array([self.target_state[0], self.target_state[1], self.target_state[2]])
-            start_time = rospy.Time.now()
+            start_time = self.get_clock().now()
             states_sol, input_sol = MPC(np.expand_dims(self.curr_state, axis=0),self.goal_state,self.ob) ##  gobal planning
-            end_time = rospy.Time.now()
-            rospy.loginfo('[pHRI Planner] phri so[lved in {} sec'.format((end_time-start_time).to_sec()))
+            end_time = self.get_clock().now()
+            self.get_logger().info('[local_planner] solved in {:.3f} sec'.format((end_time-start_time).nanoseconds/1e9))
 
             if(self.is_end == 0):
                 self.__publish_local_plan(input_sol,states_sol)
@@ -120,8 +119,7 @@ class Local_Planner():
     def __publish_local_plan(self,input_sol,state_sol):
         local_path = Path()
         local_plan = Float32MultiArray()
-        sequ = 0
-        local_path.header.stamp = rospy.Time.now()
+        local_path.header.stamp = self.get_clock().now().to_msg()
         local_path.header.frame_id = "/world"
 
         for i in range(self.N):
@@ -129,9 +127,7 @@ class Local_Planner():
             this_pose_stamped.pose.position.x = state_sol[i,0]
             this_pose_stamped.pose.position.y = state_sol[i,1]
             this_pose_stamped.pose.position.z = self.z+0.5 #self.desired_global_path[0][0,2]
-            this_pose_stamped.header.seq = sequ
-            sequ += 1
-            this_pose_stamped.header.stamp = rospy.Time.now()
+            this_pose_stamped.header.stamp = self.get_clock().now().to_msg()
             this_pose_stamped.header.frame_id="/world"
             local_path.poses.append(this_pose_stamped)
             
@@ -140,6 +136,10 @@ class Local_Planner():
 
         self.__pub_local_path.publish(local_path)
         self.__pub_local_plan.publish(local_plan)
+        try:
+            self.get_logger().info(f"[local_planner] publish local_plan first=({local_plan.data[0]:.3f},{local_plan.data[1]:.3f})")
+        except Exception:
+            pass
 
     def distance_global(self,c1,c2):
         distance = np.sqrt((c1[0]-c2[0])*(c1[0]-c2[0])+(c1[1]-c2[1])*(c1[1]-c2[1]))
@@ -176,7 +176,7 @@ class Local_Planner():
     def _global_path_callback(self, data):
         if(len(data.data)!=0):
             self.ref_path_set = True
-            size = len(data.data)/3
+            size = len(data.data)//3
             self.desired_global_path[1]=size
             for i in range(size):
                 self.desired_global_path[0][i,0]=data.data[3*(size-i)-3]
@@ -186,7 +186,7 @@ class Local_Planner():
     def _global_path_callback2(self, data):
         if(len(data.data)!=0):
             self.ref_path_set = True
-            size = len(data.data)/5
+            size = len(data.data)//5
             self.desired_global_path[1]=size
             for i in range(size):
                 self.desired_global_path[0][i,0]=data.data[5*(size-i)-5]
@@ -194,16 +194,16 @@ class Local_Planner():
                 self.desired_global_path[0][i,2]=data.data[5*(size-i)-2]
                 self.desired_global_path[0][i,3]=data.data[5*(size-i)-1]
             
-    def cmd(self, data):
-        
-        self.control_cmd.linear.x = data[0]
-        self.control_cmd.angular.z = data[1]
-        self.__pub_rtc_cmd.publish(self.control_cmd)
+    
 
 
+
+def main():
+    rclpy.init()
+    node = Local_Planner()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 if __name__ == '__main__':
-    rospy.init_node("local_planner")
-    phri_planner = Local_Planner()
-
-    rospy.spin()
+    main()

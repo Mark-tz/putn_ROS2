@@ -1,25 +1,23 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(gpr)
 
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-SET(CMAKE_BUILD_TYPE "Release")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_BUILD_TYPE "Release")
 
-find_package(catkin REQUIRED COMPONENTS   
-  roscpp
-  std_msgs
-  )
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
 
-catkin_package(
-  INCLUDE_DIRS include
-)
-
-include_directories(
-  include 
-  ${catkin_INCLUDE_DIRS}
-)
+include_directories(include)
 
 add_executable(gpr_path src/gpr_path.cpp)
-target_link_libraries(gpr_path ${catkin_LIBRARIES})
+ament_target_dependencies(gpr_path rclcpp std_msgs)
+
+install(TARGETS gpr_path
+  DESTINATION lib/${PROJECT_NAME})
+
+ament_package()
 
 
 

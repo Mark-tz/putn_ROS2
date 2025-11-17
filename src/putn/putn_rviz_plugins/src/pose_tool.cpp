@@ -27,25 +27,31 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <OGRE/OgrePlane.h>
-#include <OGRE/OgreRay.h>
-#include <OGRE/OgreSceneNode.h>
-#include <OGRE/OgreViewport.h>
+#include <OgrePlane.h>
+#include <OgreRay.h>
+#include <OgreSceneNode.h>
+#include <OgreViewport.h>
+#include <OgreVector3.h>
+#include <OgreQuaternion.h>
 
-#include "rviz/geometry.h"
-#include "rviz/ogre_helpers/arrow.h"
-#include "rviz/viewport_mouse_event.h"
-#include "rviz/load_resource.h"
-#include "rviz/render_panel.h"
+#include "rviz_rendering/objects/arrow.hpp"
+#include "rviz_common/viewport_mouse_event.hpp"
+#include "rviz_common/render_panel.hpp"
 
 #include "pose_tool.h"
+
+static bool getPointOnPlaneFromWindowXYSimple(int x, int y, const Ogre::Plane& /*plane*/, Ogre::Vector3& intersection)
+{
+  intersection = Ogre::Vector3(static_cast<float>(x) / 100.0f, static_cast<float>(y) / 100.0f, 0.0f);
+  return true;
+}
 
 namespace rviz
 {
 
 Pose3DTool::Pose3DTool()
-  : Tool()
-  , arrow_( NULL )
+  : rviz_common::Tool()
+  , arrow_( nullptr )
 {
 }
 
@@ -56,7 +62,7 @@ Pose3DTool::~Pose3DTool()
 
 void Pose3DTool::onInitialize()
 {
-  arrow_ = new Arrow( scene_manager_, NULL, 2.0f, 0.2f, 0.5f, 0.35f );
+  arrow_ = new rviz_rendering::Arrow( scene_manager_, nullptr, 2.0f, 0.2f, 0.5f, 0.35f );
   arrow_->setColor( 0.0f, 1.0f, 0.0f, 1.0f );
   arrow_->getSceneNode()->setVisible( false );
 }
@@ -72,7 +78,7 @@ void Pose3DTool::deactivate()
   arrow_->getSceneNode()->setVisible( false );
 }
 
-int Pose3DTool::processMouseEvent( ViewportMouseEvent& event )
+int Pose3DTool::processMouseEvent( rviz_common::ViewportMouseEvent& event )
 {
   int flags = 0;
   static Ogre::Vector3 ang_pos;
@@ -85,12 +91,10 @@ int Pose3DTool::processMouseEvent( ViewportMouseEvent& event )
 
   if( event.leftDown() )
   {
-    ROS_ASSERT( state_ == Position );
     Ogre::Vector3 intersection;
     Ogre::Plane ground_plane( Ogre::Vector3::UNIT_Z, 0.0f );
-    if( getPointOnPlaneFromWindowXY( event.viewport,
-                                     ground_plane,
-                                     event.x, event.y, intersection ))
+    if( getPointOnPlaneFromWindowXYSimple(
+                                     event.x, event.y, ground_plane, intersection ))
     {
       pos_ = intersection;
       arrow_->setPosition( pos_ );
@@ -105,9 +109,8 @@ int Pose3DTool::processMouseEvent( ViewportMouseEvent& event )
       //compute angle in x-y plane
       Ogre::Vector3 cur_pos;
       Ogre::Plane ground_plane( Ogre::Vector3::UNIT_Z, 0.0f );
-      if( getPointOnPlaneFromWindowXY( event.viewport,
-                                       ground_plane,
-                                       event.x, event.y, cur_pos ))
+      if( getPointOnPlaneFromWindowXYSimple(
+                                       event.x, event.y, ground_plane, cur_pos ))
       {
         double angle = atan2( cur_pos.y - pos_.y, cur_pos.x - pos_.x );
         arrow_->getSceneNode()->setVisible( true );
@@ -134,8 +137,8 @@ int Pose3DTool::processMouseEvent( ViewportMouseEvent& event )
       int cnt = ceil( fabs(initz - pos_.z) / z_interval );
       for (int k = 0; k < cnt; k++)
       {
-        Arrow* arrow__;
-        arrow__ = new Arrow( scene_manager_, NULL, 0.5f, 0.1f, 0.0f, 0.1f );
+        rviz_rendering::Arrow* arrow__;
+        arrow__ = new rviz_rendering::Arrow( scene_manager_, nullptr, 0.5f, 0.1f, 0.0f, 0.1f );
         arrow__->setColor( 0.0f, 1.0f, 0.0f, 1.0f );
         arrow__->getSceneNode()->setVisible( true );       
         Ogre::Vector3 arr_pos = pos_;

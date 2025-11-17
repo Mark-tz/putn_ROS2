@@ -1,6 +1,5 @@
 import numpy as np
 import casadi as ca
-import matplotlib.pyplot as plt
 import time
 
 

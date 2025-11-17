@@ -1,9 +1,28 @@
 #include "backward.hpp"
 #include "PUTN_planner.h"
-#include <tf/transform_listener.h>
-#include <visualization_msgs/Marker.h>
-#include <nav_msgs/Path.h>
-#include <std_msgs/Float32MultiArray.h>
+#include <rclcpp/rclcpp.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2/exceptions.h>
+#include <visualization_msgs/msg/marker.hpp>
+#include <nav_msgs/msg/path.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <pcl_conversions/pcl_conversions.h>
+#define ROS_INFO(...) RCLCPP_INFO(rclcpp::get_logger("global_planning_node"), __VA_ARGS__)
+#define ROS_WARN(...) RCLCPP_WARN(rclcpp::get_logger("global_planning_node"), __VA_ARGS__)
+#define ROS_INFO_THROTTLE(count_mod, ...) do { \
+  static int __log_counter = 0; \
+  if ((__log_counter++ % (count_mod)) == 0) { \
+    RCLCPP_INFO(rclcpp::get_logger("global_planning_node"), __VA_ARGS__); \
+  } \
+} while(0)
+#define ROS_WARN_THROTTLE(count_mod, ...) do { \
+  static int __log_counter_w = 0; \
+  if ((__log_counter_w++ % (count_mod)) == 0) { \
+    RCLCPP_WARN(rclcpp::get_logger("global_planning_node"), __VA_ARGS__); \
+  } \
+} while(0)
 
 using namespace std;
 using namespace std_msgs;
@@ -17,22 +36,25 @@ namespace backward
 backward::SignalHandling sh;
 }
 
-// ros related
-ros::Subscriber map_sub, wp_sub;
+// ros2 related
+rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr map_sub;
+rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr wp_sub;
 
-ros::Publisher grid_map_vis_pub;
-ros::Publisher path_vis_pub;
-ros::Publisher goal_vis_pub;
-ros::Publisher surf_vis_pub;
-ros::Publisher tree_vis_pub;
-ros::Publisher path_interpolation_pub;
-ros::Publisher tree_tra_pub;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr grid_map_vis_pub;
+rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr path_vis_pub;
+rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr goal_vis_pub;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr surf_vis_pub;
+rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr tree_vis_pub;
+rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr path_interpolation_pub;
+rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr tree_tra_pub;
 
 // indicate whether the robot has a moving goal
 bool has_goal = false;
 
 // simulation param from launch file
 double resolution;
+double z_min;
+double z_max;
 double goal_thre;
 double step_size;
 double h_surf_car;
@@ -48,50 +70,60 @@ World* world = NULL;
 PFRRTStar* pf_rrt_star = NULL;
 
 // function declaration
-void rcvWaypointsCallback(const nav_msgs::Path& wp);
-void rcvPointCloudCallBack(const sensor_msgs::PointCloud2& pointcloud_map);
-void pubInterpolatedPath(const vector<Node*>& solution, ros::Publisher* _path_interpolation_pub);
+void rcvWaypointsCallback(const nav_msgs::msg::Path::SharedPtr wp);
+void rcvPointCloudCallBack(const sensor_msgs::msg::PointCloud2::SharedPtr pointcloud_map);
+void pubInterpolatedPath(const vector<Node*>& solution, rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr* path_interpolation_pub);
 void findSolution();
 void callPlanner();
 
 /**
  *@brief receive goal from rviz
  */
-void rcvWaypointsCallback(const nav_msgs::Path& wp)
+void rcvWaypointsCallback(const nav_msgs::msg::Path::SharedPtr wp)
 {
   if (!world->has_map_)
     return;
   has_goal = true;
-  target_pt = Vector3d(wp.poses[0].pose.position.x, wp.poses[0].pose.position.y, wp.poses[0].pose.position.z);
+  target_pt = Vector3d(wp->poses[0].pose.position.x, wp->poses[0].pose.position.y, wp->poses[0].pose.position.z);
   ROS_INFO("Receive the planning target");
 }
 
 /**
  *@brief receive point cloud to build the grid map
  */
-void rcvPointCloudCallBack(const sensor_msgs::PointCloud2& pointcloud_map)
+void rcvPointCloudCallBack(const sensor_msgs::msg::PointCloud2::SharedPtr pointcloud_map)
 {
   pcl::PointCloud<pcl::PointXYZ> cloud;
-  pcl::fromROSMsg(pointcloud_map, cloud);
+  pcl::fromROSMsg(*pointcloud_map, cloud);
 
-  world->initGridMap(cloud);
-
+  pcl::PointCloud<pcl::PointXYZ> cloud_clip;
+  cloud_clip.reserve(cloud.size());
   for (const auto& pt : cloud)
+  {
+    if (pt.z >= z_min && pt.z <= z_max) {
+      cloud_clip.push_back(pt);
+    }
+  }
+
+  world->initGridMap(cloud_clip);
+
+  for (const auto& pt : cloud_clip)
   {
     Vector3d obstacle(pt.x, pt.y, pt.z);
     world->setObs(obstacle);
   }
-  visWorld(world, &grid_map_vis_pub);
+  ROS_INFO_THROTTLE(50, "global_planning_node: cloud_in=%zu cloud_clip=%zu z=[%.3f,%.3f]", cloud.size(), cloud_clip.size(), z_min, z_max);
+  visWorld(world, grid_map_vis_pub);
 }
 
 /**
  *@brief Linearly interpolate the generated path to meet the needs of local planning
  */
-void pubInterpolatedPath(const vector<Node*>& solution, ros::Publisher* path_interpolation_pub)
+void pubInterpolatedPath(const vector<Node*>& solution, rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr* path_interpolation_pub)
 {
-  if (path_interpolation_pub == NULL)
+  if (!path_interpolation_pub || !(*path_interpolation_pub))
     return;
-  Float32MultiArray msg;
+  std_msgs::msg::Float32MultiArray msg;
   for (size_t i = 0; i < solution.size(); i++)
   {
     if (i == solution.size() - 1)
@@ -113,7 +145,7 @@ void pubInterpolatedPath(const vector<Node*>& solution, ros::Publisher* path_int
       }
     }
   }
-  path_interpolation_pub->publish(msg);
+  (*path_interpolation_pub)->publish(msg);
 }
 
 /**
@@ -122,8 +154,8 @@ void pubInterpolatedPath(const vector<Node*>& solution, ros::Publisher* path_int
  */
 void findSolution()
 {
-  printf("=========================================================================\n");
-  ROS_INFO("Start calling PF-RRT*");
+  
+  ROS_INFO_THROTTLE(50, "Start calling PF-RRT*");
   Path solution = Path();
 
   pf_rrt_star->initWithGoal(start_pt, target_pt);
@@ -137,7 +169,7 @@ void findSolution()
   //       global planning and try to generate a path
   else if (pf_rrt_star->state() == Global)
   {
-    ROS_INFO("Starting PF-RRT* algorithm at the state of global planning");
+    ROS_INFO_THROTTLE(200, "Starting PF-RRT* algorithm at the state of global planning");
     int max_iter = 5000;
     double max_time = 100.0;
 
@@ -148,44 +180,44 @@ void findSolution()
     }
 
     if (!solution.nodes_.empty())
-      ROS_INFO("Get a global path!");
+      ROS_INFO_THROTTLE(50, "Get a global path!");
     else
-      ROS_WARN("No solution found!");
+      ROS_WARN_THROTTLE(50, "No solution found!");
   }
   // Case3: If the origin can be projected while the target can not,the PF-RRT*
   //       will try to find a temporary target for transitions.
   else
   {
-    ROS_INFO("Starting PF-RRT* algorithm at the state of rolling planning");
+    ROS_INFO_THROTTLE(50, "Starting PF-RRT* algorithm at the state of rolling planning");
     int max_iter = 1500;
     double max_time = 100.0;
 
     solution = pf_rrt_star->planner(max_iter, max_time);
 
     if (!solution.nodes_.empty())
-      ROS_INFO("Get a sub path!");
+      ROS_INFO_THROTTLE(50, "Get a sub path!");
     else
-      ROS_WARN("No solution found!");
+      ROS_WARN_THROTTLE(50, "No solution found!");
   }
-  ROS_INFO("End calling PF-RRT*");
-  printf("=========================================================================\n");
+  ROS_INFO_THROTTLE(50, "End calling PF-RRT*");
+  
 
   pubInterpolatedPath(solution.nodes_, &path_interpolation_pub);
-  visPath(solution.nodes_, &path_vis_pub);
-  visSurf(solution.nodes_, &surf_vis_pub);
+  visPath(solution.nodes_, path_vis_pub);
+  visSurf(solution.nodes_, surf_vis_pub);
 
   // When the PF-RRT* generates a short enough global path,it's considered that the robot has
   // reached the goal region.
   if (solution.type_ == Path::Global && EuclideanDistance(pf_rrt_star->origin(), pf_rrt_star->target()) < goal_thre)
   {
     has_goal = false;
-    visOriginAndGoal({}, &goal_vis_pub);  // Passing an empty set to delete the previous display
-    visPath({}, &path_vis_pub);
-    ROS_INFO("The Robot has achieved the goal!!!");
+    visOriginAndGoal({}, goal_vis_pub);
+    visPath({}, path_vis_pub);
+    ROS_INFO_THROTTLE(50, "The Robot has achieved the goal!!!");
   }
 
   if (solution.type_ == Path::Empty)
-    visPath({}, &path_vis_pub);
+    visPath({}, path_vis_pub);
 }
 
 /**
@@ -225,85 +257,101 @@ void callPlanner()
   }
   // The expansion of tree will stop after the process of initialization takes more than 1s
   else
-    ROS_INFO("The tree is large enough.Stop expansion!Current size: %d", (int)(pf_rrt_star->tree().size()));
+    ROS_INFO_THROTTLE(50, "The tree is large enough.Stop expansion!Current size: %d", (int)(pf_rrt_star->tree().size()));
 }
 
 int main(int argc, char** argv)
 {
-  ros::init(argc, argv, "global_planning_node");
-  ros::NodeHandle nh("~");
+  rclcpp::init(argc, argv);
+  auto node = rclcpp::Node::make_shared("global_planning_node");
 
-  map_sub = nh.subscribe("map", 1, rcvPointCloudCallBack);
-  wp_sub = nh.subscribe("waypoints", 1, rcvWaypointsCallback);
+  map_sub = node->create_subscription<sensor_msgs::msg::PointCloud2>("map", 10, rcvPointCloudCallBack);
+  wp_sub = node->create_subscription<nav_msgs::msg::Path>("waypoints", 10, rcvWaypointsCallback);
 
-  grid_map_vis_pub = nh.advertise<sensor_msgs::PointCloud2>("grid_map_vis", 1);
-  path_vis_pub = nh.advertise<visualization_msgs::Marker>("path_vis", 20);
-  goal_vis_pub = nh.advertise<visualization_msgs::Marker>("goal_vis", 1);
-  surf_vis_pub = nh.advertise<sensor_msgs::PointCloud2>("surf_vis", 100);
-  tree_vis_pub = nh.advertise<visualization_msgs::Marker>("tree_vis", 1);
-  tree_tra_pub = nh.advertise<std_msgs::Float32MultiArray>("tree_tra", 1);
-  path_interpolation_pub = nh.advertise<std_msgs::Float32MultiArray>("global_path", 1000);
+  grid_map_vis_pub = node->create_publisher<sensor_msgs::msg::PointCloud2>("grid_map_vis", 10);
+  path_vis_pub = node->create_publisher<visualization_msgs::msg::Marker>("path_vis", 20);
+  goal_vis_pub = node->create_publisher<visualization_msgs::msg::Marker>("goal_vis", 10);
+  surf_vis_pub = node->create_publisher<sensor_msgs::msg::PointCloud2>("surf_vis", 100);
+  tree_vis_pub = node->create_publisher<visualization_msgs::msg::Marker>("tree_vis", 10);
+  tree_tra_pub = node->create_publisher<std_msgs::msg::Float32MultiArray>("tree_tra", 10);
+  path_interpolation_pub = node->create_publisher<std_msgs::msg::Float32MultiArray>("global_path", 10);
 
-  nh.param("map/resolution", resolution, 0.1);
+  node->declare_parameter<double>("map/resolution", 0.1);
+  node->get_parameter("map/resolution", resolution);
+  node->declare_parameter<double>("map/z_min", -0.5);
+  node->declare_parameter<double>("map/z_max", 0.4);
+  node->get_parameter("map/z_min", z_min);
+  node->get_parameter("map/z_max", z_max);
 
-  nh.param("planning/goal_thre", goal_thre, 1.0);
-  nh.param("planning/step_size", step_size, 0.2);
-  nh.param("planning/h_surf_car", h_surf_car, 0.4);
-  nh.param("planning/neighbor_radius", neighbor_radius, 1.0);
+  node->declare_parameter<double>("planning/goal_thre", 1.0);
+  node->declare_parameter<double>("planning/step_size", 0.2);
+  node->declare_parameter<double>("planning/h_surf_car", 0.4);
+  node->declare_parameter<double>("planning/neighbor_radius", 1.0);
+  node->declare_parameter<double>("planning/w_fit_plane", 0.4);
+  node->declare_parameter<double>("planning/w_flatness", 4000.0);
+  node->declare_parameter<double>("planning/w_slope", 0.4);
+  node->declare_parameter<double>("planning/w_sparsity", 0.4);
+  node->declare_parameter<double>("planning/ratio_min", 0.25);
+  node->declare_parameter<double>("planning/ratio_max", 0.4);
+  node->declare_parameter<double>("planning/conv_thre", 0.1152);
+  node->declare_parameter<double>("planning/radius_fit_plane", 1.0);
+  node->declare_parameter<double>("planning/max_initial_time", 1000.0);
 
-  nh.param("planning/w_fit_plane", fit_plane_arg.w_total_, 0.4);
-  nh.param("planning/w_flatness", fit_plane_arg.w_flatness_, 4000.0);
-  nh.param("planning/w_slope", fit_plane_arg.w_slope_, 0.4);
-  nh.param("planning/w_sparsity", fit_plane_arg.w_sparsity_, 0.4);
-  nh.param("planning/ratio_min", fit_plane_arg.ratio_min_, 0.25);
-  nh.param("planning/ratio_max", fit_plane_arg.ratio_max_, 0.4);
-  nh.param("planning/conv_thre", fit_plane_arg.conv_thre_, 0.1152);
+  node->get_parameter("planning/goal_thre", goal_thre);
+  node->get_parameter("planning/step_size", step_size);
+  node->get_parameter("planning/h_surf_car", h_surf_car);
+  node->get_parameter("planning/neighbor_radius", neighbor_radius);
 
-  nh.param("planning/radius_fit_plane", radius_fit_plane, 1.0);
+  node->get_parameter("planning/w_fit_plane", fit_plane_arg.w_total_);
+  node->get_parameter("planning/w_flatness", fit_plane_arg.w_flatness_);
+  node->get_parameter("planning/w_slope", fit_plane_arg.w_slope_);
+  node->get_parameter("planning/w_sparsity", fit_plane_arg.w_sparsity_);
+  node->get_parameter("planning/ratio_min", fit_plane_arg.ratio_min_);
+  node->get_parameter("planning/ratio_max", fit_plane_arg.ratio_max_);
+  node->get_parameter("planning/conv_thre", fit_plane_arg.conv_thre_);
 
-  nh.param("planning/max_initial_time", max_initial_time, 1000.0);
+  node->get_parameter("planning/radius_fit_plane", radius_fit_plane);
+  node->get_parameter("planning/max_initial_time", max_initial_time);
 
-  // Initialization
   world = new World(resolution);
   pf_rrt_star = new PFRRTStar(h_surf_car, world);
 
-  // Set argument of PF-RRT*
   pf_rrt_star->setGoalThre(goal_thre);
   pf_rrt_star->setStepSize(step_size);
   pf_rrt_star->setFitPlaneArg(fit_plane_arg);
   pf_rrt_star->setFitPlaneRadius(radius_fit_plane);
   pf_rrt_star->setNeighborRadius(neighbor_radius);
 
-  pf_rrt_star->goal_vis_pub_ = &goal_vis_pub;
-  pf_rrt_star->tree_vis_pub_ = &tree_vis_pub;
-  pf_rrt_star->tree_tra_pub_ = &tree_tra_pub;
+  pf_rrt_star->goal_vis_pub_ = goal_vis_pub;
+  pf_rrt_star->tree_vis_pub_ = tree_vis_pub;
+  pf_rrt_star->tree_tra_pub_ = tree_tra_pub;
 
-  tf::TransformListener listener;
+  auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  tf2_ros::TransformListener tf_listener(*tf_buffer);
 
-  while (ros::ok())
+  while (rclcpp::ok())
   {
     timeval start;
     gettimeofday(&start, NULL);
 
-    // Update the position of the origin
-    tf::StampedTransform transform;
-    while (true && ros::ok())
+    geometry_msgs::msg::TransformStamped transform;
+    while (true && rclcpp::ok())
     {
       try
       {
-        listener.lookupTransform("/world", "/base_link", ros::Time(0), transform);  //查询变换
+        transform = tf_buffer->lookupTransform("world", "base_link", tf2::TimePointZero);
         break;
       }
-      catch (tf::TransformException& ex)
+      catch (const tf2::TransformException& ex)
       {
         continue;
       }
     }
-    start_pt << transform.getOrigin().x(), transform.getOrigin().y(), transform.getOrigin().z();
+    start_pt << transform.transform.translation.x,
+                transform.transform.translation.y,
+                transform.transform.translation.z;
 
-    // Execute the callback functions to update the grid map and check if there's a new goal
-    ros::spinOnce();
-    // Call the PF-RRT* to work
+    rclcpp::spin_some(node);
     callPlanner();
     double ms;
     do
@@ -311,7 +359,8 @@ int main(int argc, char** argv)
       timeval end;
       gettimeofday(&end, NULL);
       ms = 1000 * (end.tv_sec - start.tv_sec) + 0.001 * (end.tv_usec - start.tv_usec);
-    } while (ms < 100);  // Cycle in 100ms
+    } while (ms < 100);
   }
+  rclcpp::shutdown();
   return 0;
 }

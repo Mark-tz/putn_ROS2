@@ -9,12 +9,12 @@
 
 #include "scout_gazebo/scout_skid_steer.hpp"
 
-#include <geometry_msgs/Twist.h>
-#include <std_msgs/Float64.h>
+#include <geometry_msgs/msg/twist.hpp>
+#include <std_msgs/msg/float64.hpp>
 
 namespace wescore {
-ScoutSkidSteer::ScoutSkidSteer(ros::NodeHandle *nh, std::string robot_name)
-    : nh_(nh), robot_name_(robot_name) {
+ScoutSkidSteer::ScoutSkidSteer(std::shared_ptr<rclcpp::Node> node, std::string robot_name)
+    : node_(std::move(node)), robot_name_(robot_name) {
   motor_fr_topic_ = robot_name_ + "/scout_motor_fr_controller/command";
   motor_fl_topic_ = robot_name_ + "/scout_motor_fl_controller/command";
   motor_rl_topic_ = robot_name_ + "/scout_motor_rl_controller/command";
@@ -23,20 +23,17 @@ ScoutSkidSteer::ScoutSkidSteer(ros::NodeHandle *nh, std::string robot_name)
 }
 
 void ScoutSkidSteer::SetupSubscription() {
-  // command subscriber
-  cmd_sub_ = nh_->subscribe<geometry_msgs::Twist>(
-      cmd_topic_, 5, &ScoutSkidSteer::TwistCmdCallback, this);
+  cmd_sub_ = node_->create_subscription<geometry_msgs::msg::Twist>(
+      cmd_topic_, 5, std::bind(&ScoutSkidSteer::TwistCmdCallback, this, std::placeholders::_1));
 
-  // motor command publisher
-  motor_fr_pub_ = nh_->advertise<std_msgs::Float64>(motor_fr_topic_, 50);
-  motor_fl_pub_ = nh_->advertise<std_msgs::Float64>(motor_fl_topic_, 50);
-  motor_rl_pub_ = nh_->advertise<std_msgs::Float64>(motor_rl_topic_, 50);
-  motor_rr_pub_ = nh_->advertise<std_msgs::Float64>(motor_rr_topic_, 50);
+  motor_fr_pub_ = node_->create_publisher<std_msgs::msg::Float64>(motor_fr_topic_, 50);
+  motor_fl_pub_ = node_->create_publisher<std_msgs::msg::Float64>(motor_fl_topic_, 50);
+  motor_rl_pub_ = node_->create_publisher<std_msgs::msg::Float64>(motor_rl_topic_, 50);
+  motor_rr_pub_ = node_->create_publisher<std_msgs::msg::Float64>(motor_rr_topic_, 50);
 }
 
-void ScoutSkidSteer::TwistCmdCallback(
-    const geometry_msgs::Twist::ConstPtr &msg) {
-  std_msgs::Float64 motor_cmd[4];
+void ScoutSkidSteer::TwistCmdCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
+  std_msgs::msg::Float64 motor_cmd[4];
 
   double driving_vel = msg->linear.x;
   double steering_vel = msg->angular.z;
@@ -51,10 +48,10 @@ void ScoutSkidSteer::TwistCmdCallback(
   motor_cmd[2].data = -left_side_velocity;
   motor_cmd[3].data = right_side_velocity;
 
-  motor_fr_pub_.publish(motor_cmd[0]);
-  motor_fl_pub_.publish(motor_cmd[1]);
-  motor_rl_pub_.publish(motor_cmd[2]);
-  motor_rr_pub_.publish(motor_cmd[3]);
+  motor_fr_pub_->publish(motor_cmd[0]);
+  motor_fl_pub_->publish(motor_cmd[1]);
+  motor_rl_pub_->publish(motor_cmd[2]);
+  motor_rr_pub_->publish(motor_cmd[3]);
 }
 
 }  // namespace wescore

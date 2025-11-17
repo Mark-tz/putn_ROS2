@@ -1,7 +1,7 @@
 #include "gaussian_process_regression/gaussian_process_regression.h"
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 #include <fstream>
-#include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/msg/float32_multi_array.hpp>
 
 using namespace std;
 using namespace Eigen;
@@ -14,7 +14,7 @@ typedef Eigen::Matrix<float,3,1> input_type;
 typedef Eigen::Matrix<float,1,1> output_type;
 std::vector<input_type> train_inputs, test_inputs;
 std::vector<output_type> train_outputs, test_outputs;
-ros::Publisher _surf_predict_pub;
+rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr _surf_predict_pub;
 
 string filepath;
     
@@ -68,11 +68,11 @@ void ClearVectorOut( vector< output_type >& vt )
   veTemp.swap( vt );
 }
 
-void treecb(const std_msgs::Float32MultiArray::ConstPtr& msg)
+void treecb(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
 {
   double dur;
   clock_t start,end;start = clock();
-  ROS_INFO("[node] receive the tree");
+  RCLCPP_INFO(rclcpp::get_logger("gpr_path"), "[node] receive the tree");
   if(msg->data.size() == 0) return;
 
   int num = (int)(msg->data.size()/4);
@@ -106,8 +106,8 @@ void treecb(const std_msgs::Float32MultiArray::ConstPtr& msg)
   }
 
 
-   std_msgs::Float32MultiArray out_ym;
-   std_msgs::Float32MultiArray out_ys;
+   std_msgs::msg::Float32MultiArray out_ym;
+   std_msgs::msg::Float32MultiArray out_ys;
 
   for(size_t k=0; k<test_inputs.size(); k++)
   {
@@ -124,8 +124,8 @@ void treecb(const std_msgs::Float32MultiArray::ConstPtr& msg)
     out_ym.data.push_back(outp_cov(0,0));
 
   }
-  _surf_predict_pub.publish(out_ym);
-  std_msgs::Float32MultiArray tmp_out;
+  _surf_predict_pub->publish(out_ym);
+  std_msgs::msg::Float32MultiArray tmp_out;
   ClearVectorIn(train_inputs);
   ClearVectorIn(test_inputs);
   ClearVectorOut(train_outputs);
@@ -135,9 +135,9 @@ void treecb(const std_msgs::Float32MultiArray::ConstPtr& msg)
   cout<<"Time consume ："<<dur/1000<<" ms"<<endl;
 }
 
-void pathcb(const std_msgs::Float32MultiArray::ConstPtr& msg)
+void pathcb(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
 {
-  ROS_INFO("[node] receive the path");
+  RCLCPP_INFO(rclcpp::get_logger("gpr_path"), "[node] receive the path");
   if(msg->data.size() == 0) return;
 
   int num = (int)(msg->data.size()/3) ;
@@ -152,18 +152,16 @@ void pathcb(const std_msgs::Float32MultiArray::ConstPtr& msg)
 
 int main(int argc, char **argv)
 {
-    ros::init (argc, argv, "GPR");
-    ros::NodeHandle ph("~");
-    ros::Subscriber _tree_sub,_path_sub;
-    
-    _tree_sub = ph.subscribe( "/global_planning_node/tree_tra",  1,treecb  );
-    _path_sub = ph.subscribe( "/global_planning_node/global_path",  1,pathcb  );
-    _surf_predict_pub = ph.advertise< std_msgs::Float32MultiArray>("/surf_predict_pub",1);
+    rclcpp::init(argc, argv);
+    auto node = rclcpp::Node::make_shared("GPR");
 
-    ph.param<string>("file/cfg_path",filepath,"");   
-    while(ros::ok())
-    {
-        ros::spinOnce();
-    }
+    auto _tree_sub = node->create_subscription<std_msgs::msg::Float32MultiArray>("/global_planning_node/tree_tra", 1, treecb);
+    auto _path_sub = node->create_subscription<std_msgs::msg::Float32MultiArray>("/global_planning_node/global_path", 1, pathcb);
+    _surf_predict_pub = node->create_publisher<std_msgs::msg::Float32MultiArray>("/surf_predict_pub",1);
+
+    filepath = node->declare_parameter<string>("file/cfg_path", "");
+
+    rclcpp::spin(node);
+    rclcpp::shutdown();
     return 0;
 };

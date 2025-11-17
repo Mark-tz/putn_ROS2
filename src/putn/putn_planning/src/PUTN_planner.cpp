@@ -1,14 +1,13 @@
 #include "PUTN_planner.h"
-#include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/msg/float32_multi_array.hpp>
 #include <random>
 
 using namespace std;
-using namespace std_msgs;
 using namespace Eigen;
-using namespace ros;
 using namespace PUTN;
 using namespace PUTN::visualization;
 using namespace PUTN::planner;
+#include <rclcpp/rclcpp.hpp>
 
 PFRRTStar::PFRRTStar(){}
 PFRRTStar::PFRRTStar(const double &height,World* world):h_surf_(height),world_(world){}
@@ -625,8 +624,8 @@ Path PFRRTStar::planner(const int &max_iter,const double &max_time)
 {
     if(planning_state_==Invalid)
     {
-        ROS_ERROR("Illegal operation:the planner is at an invalid working state!!");
-        return {};
+        RCLCPP_ERROR(rclcpp::get_logger("putn_planner"), "Illegal operation:the planner is at an invalid working state!!");
+        return Path();
     }
     double time_now=curr_time_;
     timeval start;gettimeofday(&start,NULL);
@@ -688,18 +687,17 @@ Path PFRRTStar::planner(const int &max_iter,const double &max_time)
 
     if(planning_state_==Roll) generatePath();
 
-    visTree(tree_,tree_vis_pub_);
+    visTree(tree_, tree_vis_pub_);
     pubTraversabilityOfTree(tree_tra_pub_);
     
     return path_;
 }
 
-void PFRRTStar::pubTraversabilityOfTree(Publisher* tree_tra_pub)
+void PFRRTStar::pubTraversabilityOfTree(rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr tree_tra_pub)
 {
-    if(tree_tra_pub==NULL) return;
-    Float32MultiArray msg;
-    for(const auto&node:tree_)
-    {
+    if (!tree_tra_pub) return;
+    std_msgs::msg::Float32MultiArray msg;
+    for (const auto& node : tree_) {
         msg.data.push_back(node->position_(0));
         msg.data.push_back(node->position_(1));
         msg.data.push_back(node->position_(2));

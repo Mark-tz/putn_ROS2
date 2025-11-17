@@ -30,20 +30,22 @@
 #ifndef RVIZ_POSE_TOOL_H
 #define RVIZ_POSE_TOOL_H
 
-#include <OGRE/OgreVector3.h>
-
 #include <QCursor>
-
-#include <ros/ros.h>
-
-#include "rviz/tool.h"
+#include <vector>
+#include "rviz_common/tool.hpp"
+#include "rviz_common/viewport_mouse_event.hpp"
+#include "rviz_common/render_panel.hpp"
+#include "rviz_rendering/objects/arrow.hpp"
+#include <OgreVector3.h>
+#include <OgrePlane.h>
+#include <OgreQuaternion.h>
 
 namespace rviz
 {
 class Arrow;
 class DisplayContext;
 
-class Pose3DTool: public Tool
+class Pose3DTool: public rviz_common::Tool
 {
 public:
   Pose3DTool();
@@ -54,13 +56,13 @@ public:
   virtual void activate();
   virtual void deactivate();
 
-  virtual int processMouseEvent( ViewportMouseEvent& event );
+  virtual int processMouseEvent( rviz_common::ViewportMouseEvent& event );
 
 protected:
   virtual void onPoseSet(double x, double y, double z, double theta) = 0;
 
-  Arrow* arrow_;
-  std::vector<Arrow*> arrow_array;
+  rviz_rendering::Arrow* arrow_;
+  std::vector<rviz_rendering::Arrow*> arrow_array;
 
   enum State
   {

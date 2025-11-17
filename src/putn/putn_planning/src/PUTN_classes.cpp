@@ -172,10 +172,10 @@ void World::initGridMap(const Vector3d &lowerbound,const Vector3d &upperbound)
 }
 
 void World::initGridMap(const pcl::PointCloud<pcl::PointXYZ> &cloud)
-{   
+{
     if(cloud.points.empty())
     {
-        ROS_ERROR("Can not initialize the map with an empty point cloud!");
+        RCLCPP_ERROR(rclcpp::get_logger("putn_world"), "Can not initialize the map with an empty point cloud!");
         return;
     }
     clearMap();

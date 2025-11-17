@@ -10,6 +10,8 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 
 namespace PUTN
 {
@@ -90,15 +92,11 @@ public:
     Plane(const Eigen::Vector3d &p_surface,World* world,const double &radius,const FitPlaneArg &arg);
 };
 
-namespace visualization{void visWorld(World* world,ros::Publisher* world_vis_pub);}
-/**
- * @brief Class for storing obstacles and world dimension.The information of obstacle is stored in a three-dimensional bool array.
- *        Before using the PF-RRT* algorithm,a suitable grid map must be built
- */
+namespace visualization{void visWorld(World* world, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr world_vis_pub);}
 class World
 {
 public:
-    friend void visualization::visWorld(World* world,ros::Publisher* world_vis_pub);
+    friend void visualization::visWorld(World* world, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr world_vis_pub);
 
     //indicate whether the range of the grid map has been determined
     bool has_map_=false;

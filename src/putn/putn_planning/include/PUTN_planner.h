@@ -3,6 +3,9 @@
 
 #include <utility>
 #include "PUTN_vis.h"
+#include <rclcpp/rclcpp.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
 
 namespace PUTN
 {
@@ -17,10 +20,9 @@ enum PlanningState{Global,Roll,WithoutGoal,Invalid};
 class PFRRTStar
 {
 public:
-    //ros related,which will not work unless the user assigns.
-    ros::Publisher* tree_vis_pub_=NULL;
-    ros::Publisher* goal_vis_pub_=NULL;
-    ros::Publisher* tree_tra_pub_=NULL;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr tree_vis_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr goal_vis_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr tree_tra_pub_;
 
     PFRRTStar();
     PFRRTStar(const double &height,World* world);//Input the height of the robot center,and the array of grid map.
@@ -197,7 +199,7 @@ protected:
 
     float calPathDis(const std::vector<Node*> &nodes);
 
-    void pubTraversabilityOfTree(ros::Publisher* tree_tra_pub);
+    void pubTraversabilityOfTree(rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr tree_tra_pub);
 };
 }
 }
