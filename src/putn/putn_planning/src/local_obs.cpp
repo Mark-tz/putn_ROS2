@@ -18,7 +18,7 @@ rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pt_sub;
 rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr obs_pub;
 rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr obs_array_pub;
 
-double resolution, local_x_l, local_x_u, local_y_l, local_y_u, local_z_l, local_z_u;
+double resolution_xy, resolution_z, local_x_l, local_x_u, local_y_l, local_y_u, local_z_l, local_z_u;
 
 std::unique_ptr<tf2_ros::Buffer> tf_buffer;
 std::unique_ptr<tf2_ros::TransformListener> tf_listener;
@@ -55,7 +55,7 @@ void rcvVelodyneCallBack(const sensor_msgs::msg::PointCloud2::SharedPtr velodyne
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filt(new pcl::PointCloud<pcl::PointXYZ>);
   Vector3d lowerbound(local_x_l, local_y_l, local_z_l);
   Vector3d upperbound(local_x_u, local_y_u, local_z_u);
-  World local_world = World(resolution);
+  World local_world = World(resolution_xy, resolution_z);
   local_world.initGridMap(lowerbound, upperbound);
   for (const auto& pt : (*cloud_after_PassThrough).points)
   {
@@ -124,7 +124,8 @@ int main(int argc, char** argv)
   obs_pub = node->create_publisher<sensor_msgs::msg::PointCloud2>("obs_vis", 1);
   obs_array_pub = node->create_publisher<std_msgs::msg::Float32MultiArray>("/obs", 1);
 
-  node->declare_parameter("map/resolution", 0.1);
+  node->declare_parameter("map/resolution_xy", 0.1);
+  node->declare_parameter("map/resolution_z", 0.01);
   node->declare_parameter("map/local_x_l", -2.0);
   node->declare_parameter("map/local_x_u", 2.0);
   node->declare_parameter("map/local_y_l", -2.0);
@@ -132,7 +133,8 @@ int main(int argc, char** argv)
   node->declare_parameter("map/local_z_l", -0.3);
   node->declare_parameter("map/local_z_u", 0.5);
 
-  node->get_parameter("map/resolution", resolution);
+  node->get_parameter("map/resolution_xy", resolution_xy);
+  node->get_parameter("map/resolution_z", resolution_z);
   node->get_parameter("map/local_x_l", local_x_l);
   node->get_parameter("map/local_x_u", local_x_u);
   node->get_parameter("map/local_y_l", local_y_l);

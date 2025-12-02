@@ -102,6 +102,7 @@ public:
     bool has_map_=false;
 
     World(const float &resolution=0.1f);
+    World(const float &resolution_xy, const float &resolution_z);
     ~World();
 
     /**
@@ -111,6 +112,10 @@ public:
      * @return void
      */
     void initGridMap(const pcl::PointCloud<pcl::PointXYZ> &cloud);
+    void buildFromPointCloudHeightmap(const pcl::PointCloud<pcl::PointXYZ> &cloud);
+    void inflateOccupancy(const int radius_xy, const int radius_z);
+    void ensureSurfacePerColumn(const int radius_xy);
+    void inflateMap(double radius); // Inflate obstacles directly on map
 
     /**
      * @brief Manually specify the upperbound and lowerbound.
@@ -179,27 +184,46 @@ public:
      * @return float
      */
     float getResolution(){return resolution_;} 
+    float getResolutionZ(){return resolution_z_;}
 
-    Eigen::Vector3d index2coord(const Eigen::Vector3i &index)
+    Eigen::Vector3d index2coord(const Eigen::Vector3i &index) const
     {
-        Eigen::Vector3d coord = resolution_*index.cast<double>() + lowerbound_+ 0.5*resolution_*Eigen::Vector3d::Ones();
+        Eigen::Vector3d res_vec(resolution_, resolution_, resolution_z_);
+        Eigen::Vector3d coord = res_vec.cwiseProduct(index.cast<double>()) + lowerbound_ + 0.5*res_vec;
         return coord;
     }
 
-    Eigen::Vector3i coord2index(const Eigen::Vector3d &coord)
+    Eigen::Vector3i coord2index(const Eigen::Vector3d &coord) const
     {
-        Eigen::Vector3i index = ( (coord-lowerbound_)/resolution_).cast<int>();            
+        Eigen::Vector3d res_vec(resolution_, resolution_, resolution_z_);
+        Eigen::Vector3i index = ( (coord-lowerbound_).cwiseQuotient(res_vec) ).cast<int>();            
         return index;
     }
+    int getSurfaceK(int i, int j) const { return (i>=0 && j>=0 && i<idx_count_(0) && j<idx_count_(1)) ? surface_k_cache_[i*idx_count_(1)+j] : -1; }
+    void setClearanceZ(double cz){ clearance_z_ = cz; }
+    void setHeightDiffThre(double hd){ height_diff_thre_ = hd; }
+    void updateVerticalCaches();
+    double columnSlopeDeg(int i, int j) const;
+    bool isTraversableColumn(int i, int j, double max_slope_deg, int* reason_code=NULL) const;
 //protected:
     bool ***grid_map_=NULL;
 
     float resolution_;
+    float resolution_z_;
 
     Eigen::Vector3i idx_count_;
 
     Eigen::Vector3d lowerbound_;
     Eigen::Vector3d upperbound_;
+    std::vector<int> surface_k_cache_;
+    std::vector<uint8_t> blocked_column_;
+    std::vector<uint8_t> inflation_layer_; // 0=free, 1=inflated
+    double clearance_z_ = 0.5;
+    double getClearanceZ() const { return clearance_z_; }
+    double height_diff_thre_ = 0.3;
+    double getHeightDiffThre() const { return height_diff_thre_; }
+    double max_slope_deg_ = 15.0;
+    void setMaxSlopeDeg(double s) { max_slope_deg_ = s; }
 
     void clearMap();
 };

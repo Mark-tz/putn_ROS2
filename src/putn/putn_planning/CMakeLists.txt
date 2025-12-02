@@ -25,6 +25,7 @@ include_directories(
 add_executable(global_planning_node
     src/global_planning_node.cpp
     src/PUTN_planner.cpp
+    src/PUTN_astar_planner.cpp
     src/PUTN_classes.cpp
     src/PUTN_vis.cpp)
 ament_target_dependencies(global_planning_node rclcpp tf2 tf2_ros tf2_geometry_msgs geometry_msgs nav_msgs sensor_msgs visualization_msgs std_msgs pcl_conversions)

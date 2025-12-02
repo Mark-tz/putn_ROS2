@@ -9,6 +9,8 @@ install(DIRECTORY scripts
 install(PROGRAMS
   scripts/local_planner.py
   scripts/controller.py
+  scripts/pcd_publisher.py
+  scripts/fake_odom_publisher.py
   DESTINATION lib/${PROJECT_NAME})
 
 install(FILES

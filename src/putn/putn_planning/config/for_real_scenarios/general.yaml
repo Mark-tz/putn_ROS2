@@ -1,15 +1,26 @@
 global_planning_node:
   ros__parameters:
-    "map/resolution": 0.1
+    "map/resolution_xy": 0.15
+    "map/resolution_z": 0.015
     "map/z_min": -0.5
     "map/z_max": 1.0
-    "planning/step_size": 0.2
+    "planning/step_size": 0.1
     "planning/h_surf_car": 0.3
-    "planning/radius_fit_plane": 0.2
-    "planning/w_flatness": 3000.0
-    "planning/w_slope": 0.3
+    "planning/clearance_z": 0.5
+    "planning/radius_fit_plane": 0.3
+    "planning/w_flatness": 1000.0
+    "planning/w_slope": 0.03
     "planning/w_sparsity": 0.2
     "planning/w_fit_plane": 0.3
     "planning/ratio_max": 0.05
     "planning/ratio_min": 0.02
     "planning/conv_thre": 0.12
+
+    "planning/neighbor_radius": 2.0
+    
+    "planning/max_height_diff": 0.05 # 单个grid的高度差判定通行性
+    "planning/max_slope_deg": 17.0 # 与周围grid拟合坡度判定通行性
+    "planning/obs_inflation": 0.45 # 障碍物膨胀半径
+    "planning/shortcut_tolerance": 15.0 # shortcut高度差判定通行性
+
+    "planning/disable_shortcut": true # 是否禁用shortcut，用于RRT

@@ -21,6 +21,10 @@ void visWorld(World* world, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Sh
 {
   if (!world_vis_pub || !world->has_map_)
     return;
+    
+  // Optimization: Check if there are subscribers before processing
+  if (world_vis_pub->get_subscription_count() == 0) return;
+
   pcl::PointCloud<pcl::PointXYZ> cloud_vis;
   for (int i = 0; i < world->idx_count_(0); i++)
   {
@@ -31,6 +35,16 @@ void visWorld(World* world, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Sh
         Vector3i index(i, j, k);
         if (!world->grid_map_[index(0)][index(1)][index(2)])
         {
+          Vector3d coor_round = world->index2coord(index);
+          pcl::PointXYZ pt_add;
+          pt_add.x = coor_round(0);
+          pt_add.y = coor_round(1);
+          pt_add.z = coor_round(2);
+          cloud_vis.points.push_back(pt_add);
+        }
+        else if (index(2) == 0)
+        {
+          // visualize free cell centers at z=0 to reveal holes
           Vector3d coor_round = world->index2coord(index);
           pcl::PointXYZ pt_add;
           pt_add.x = coor_round(0);
@@ -51,6 +65,77 @@ void visWorld(World* world, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Sh
 
   map_vis.header.frame_id = "/world";
   world_vis_pub->publish(map_vis);
+}
+
+void visMapTraversability(World* world, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr trav_vis_pub, double max_slope_deg)
+{
+  if (!trav_vis_pub || !world->has_map_)
+    return;
+  
+  // Optimization: Check if there are subscribers before processing
+  if (trav_vis_pub->get_subscription_count() == 0) return;
+
+  pcl::PointCloud<pcl::PointXYZRGB> cloud_vis;
+  for (int i = 0; i < world->idx_count_(0); i++)
+  {
+    for (int j = 0; j < world->idx_count_(1); j++)
+    {
+      int k_surface = world->getSurfaceK(i,j);
+      if (k_surface < 0) continue;
+
+      Eigen::Vector3i idx(i,j,k_surface);
+      Eigen::Vector3d p = world->index2coord(idx);
+
+      double slope_deg = world->columnSlopeDeg(i, j);
+      int reason = 0;
+      bool traversable = world->isTraversableColumn(i, j, max_slope_deg, &reason);
+      uint8_t r, g, b;
+      
+      if (!traversable)
+      {
+        if (reason == 1) // vertical blocked
+        { r = 255; g = 0; b = 0; } // Red
+        else if (reason == 2) // slope too steep
+        { r = 0; g = 0; b = 255; } // Blue (for Slope)
+        else if (reason == 3) // Height diff / cliff
+        { r = 255; g = 20; b = 147; } // Deep Pink (for Height/Step)
+        else if (reason == 4) // Inflated
+        { r = 0; g = 255; b = 255; } // Cyan (Inflated)
+        else 
+        { r = 100; g = 100; b = 100; } // Unknown
+      }
+      else
+      {
+        // Differentiate based on slope for traversable areas
+        // Green for flat, transitioning to Yellow for max_slope
+        double ratio = std::max(0.0, std::min(1.0, slope_deg / std::max(1e-6, max_slope_deg)));
+        r = (uint8_t)(255.0 * ratio);
+        g = (uint8_t)(255.0 * (1.0 - ratio * 0.5)); // Keep some green even at max slope
+        b = 20;
+      }
+      
+      // Debug print (sampled)
+      static int debug_cnt = 0;
+      if (debug_cnt++ % 10000 == 0) {
+          // RCLCPP_INFO(rclcpp::get_logger("vis"), "VIS: i=%d j=%d slope=%.2f max_slope=%.2f trav=%d reason=%d blocked=%d", 
+          //   i, j, slope_deg, max_slope_deg, traversable, reason, (int)world->blocked_column_[i*world->idx_count_(1)+j]);
+      }
+
+      pcl::PointXYZRGB pt;
+      pt.x = p(0); pt.y = p(1); pt.z = p(2);
+      pt.r = r; pt.g = g; pt.b = b;
+      cloud_vis.points.push_back(pt);
+    }
+  }
+
+  cloud_vis.width = cloud_vis.points.size();
+  cloud_vis.height = 1;
+  cloud_vis.is_dense = true;
+
+  sensor_msgs::msg::PointCloud2 map_vis;
+  pcl::toROSMsg(cloud_vis, map_vis);
+  map_vis.header.frame_id = "/world";
+  trav_vis_pub->publish(map_vis);
 }
 
 void visSurf(const vector<Node*>& solution, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr surf_vis_pub)
@@ -211,22 +296,28 @@ void visTree(const vector<Node*>& tree, rclcpp::Publisher<visualization_msgs::ms
 {
   if (!tree_vis_pub)
     return;
-  visualization_msgs::msg::Marker Points, Line;
+  visualization_msgs::msg::Marker Points, Line, Rejected;
   Points.header.frame_id = Line.header.frame_id = "world";
-  Points.ns = Line.ns = "Tree";
-  Points.action = Line.action = visualization_msgs::msg::Marker::ADD;
+  Rejected.header.frame_id = "world";
+  Points.ns = Line.ns = Rejected.ns = "Tree";
+  Points.action = Line.action = Rejected.action = visualization_msgs::msg::Marker::ADD;
   Points.pose.orientation.w = Line.pose.orientation.w = 1.0f;
+  Rejected.pose.orientation.w = 1.0f;
   Points.id = 0;
   Line.id = 1;
+  Rejected.id = 2;
 
   Points.type = visualization_msgs::msg::Marker::POINTS;
   Line.type = visualization_msgs::msg::Marker::LINE_LIST;
+  Rejected.type = visualization_msgs::msg::Marker::LINE_LIST;
 
   Points.scale.x = Points.scale.y = 0.05;
   Line.scale.x = 0.01;
+  Rejected.scale.x = 0.02;
 
   Points.color.g = Points.color.a = 0.5f;
   Line.color.b = Line.color.a = 0.75f;
+  Rejected.color.r = Rejected.color.a = 0.8f;
 
   geometry_msgs::msg::Point pt;
   geometry_msgs::msg::Point parent_pt;
@@ -245,10 +336,16 @@ void visTree(const vector<Node*>& tree, rclcpp::Publisher<visualization_msgs::ms
       parent_pt.y = node->parent_->position_(1);
       parent_pt.z = node->parent_->position_(2);
       Line.points.push_back(parent_pt);
+      // render rejected segments: if collisionFree fails or hard constraints fail, draw in red
+      if (!PUTN::EuclideanDistance(node, node->parent_) || !true)
+      {
+        // placeholder: actual decision rendered elsewhere when we add tracking
+      }
     }
   }
   tree_vis_pub->publish(Points);
   tree_vis_pub->publish(Line);
+  tree_vis_pub->publish(Rejected);
 }
 
 vector<Vector4d> generateFrame(const vector<Vector3d>& pts, const vector<float>& color_pts,

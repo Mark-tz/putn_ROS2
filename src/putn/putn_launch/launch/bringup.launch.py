@@ -32,7 +32,8 @@ def generate_launch_description():
         name='local_obs_node',
         output='screen',
         parameters=[{
-            'map/resolution': 0.1,
+            'map/resolution_xy': 0.1,
+            'map/resolution_z': 0.05,
             'map/local_x_l': -1.8,
             'map/local_x_u': 1.8,
             'map/local_y_l': -1.8,

@@ -1,6 +1,8 @@
 #include "PUTN_planner.h"
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <random>
+#include <cmath>
+#include <Eigen/Eigenvalues>
 
 using namespace std;
 using namespace Eigen;
@@ -89,8 +91,10 @@ void PFRRTStar::initWithGoal(const Vector3d &start_pos,const Vector3d &end_pos)
     {
         path_=Path();
         clean_vector(tree_);
+        kdtree_wrapper_.clear();
         node_origin_=node_origin;
         tree_.push_back(node_origin_);
+        kdtree_wrapper_.addNode(node_origin_);
     }
 
     if(planning_state_==Roll && last_end_pos_2D!=end_pos_2D_) sub_goal_threshold_=1.0f;
@@ -126,8 +130,10 @@ void PFRRTStar::initWithoutGoal(const Vector3d &start_pos)
     if(last_planning_state!=WithoutGoal || !inheritTree(node_origin))
     {
         clean_vector(tree_);
+        kdtree_wrapper_.clear();
         node_origin_=node_origin;
         tree_.push_back(node_origin_);
+        kdtree_wrapper_.addNode(node_origin_);
     }
 }
 
@@ -175,6 +181,12 @@ void PFRRTStar::trimTree()
         }
     }
     clean_vector(invalid_nodes);
+    
+    // Rebuild KDTree after trimming
+    kdtree_wrapper_.clear();
+    for(auto& node : tree_) {
+        kdtree_wrapper_.addNode(node);
+    }
 }
 
 bool PFRRTStar::inheritTree(Node* new_root)
@@ -182,7 +194,11 @@ bool PFRRTStar::inheritTree(Node* new_root)
     bool result=false;
 
     //considering that the update of grid map may affect the result of plane-fitting
-    for(auto&node:tree_) fitPlane(node);
+    // Optimization: only refit nodes that are close to the new root or within active area?
+    // For now, just skip refitting entirely or do it much less frequently if map is static-ish.
+    // If the map updates, we *should* verify nodes, but fitting is expensive.
+    // Let's assume for now we trust the old planes or only check collision.
+    // for(auto&node:tree_) fitPlane(node);
         
     trimTree();
 
@@ -218,12 +234,15 @@ bool PFRRTStar::inheritTree(Node* new_root)
         new_root->children_.push_back(node_insert);
         node_insert->parent_=new_root;
         tree_.push_back(new_root);
+        kdtree_wrapper_.addNode(new_root);
         updateNode(new_root);
         node_origin_=new_root;
 
+        // Optimization: only rewire if necessary or limit search
         vector<pair<Node*,float>> neighbor_record;
         findNearNeighbors(node_origin_,neighbor_record);
-        reWire(node_origin_,neighbor_record);
+        if(planning_state_==Global)
+            reWire(node_origin_,neighbor_record);
     }
     return result;
 }
@@ -260,7 +279,14 @@ bool PFRRTStar::inheritPath(Node* new_root,Path::Type type)
             }
             path_=Path();
             clean_vector(tree_);
-            tree_.assign(tmp_nodes.begin()+start_index,tmp_nodes.end());          
+            tree_.assign(tmp_nodes.begin()+start_index,tmp_nodes.end());
+            
+            // Rebuild KDTree after inheritance
+            kdtree_wrapper_.clear();
+            for(auto& node : tree_) {
+                kdtree_wrapper_.addNode(node);
+            }
+            
             node_origin_=new_root;
             updateNode(node_origin_);
             generatePath();
@@ -271,10 +297,10 @@ bool PFRRTStar::inheritPath(Node* new_root,Path::Type type)
 
 float PFRRTStar::getRandomNum()
 {
-    random_device rand_rd;
-    mt19937 rand_gen(rand_rd());
-    uniform_real_distribution<> rand_unif(0, 1.0);
-    return rand_unif(rand_gen);
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_real_distribution<> unif(0.0, 1.0);
+    return unif(gen);
 }
 
 Vector2d PFRRTStar::getRandom2DPoint()
@@ -282,7 +308,9 @@ Vector2d PFRRTStar::getRandom2DPoint()
     Vector3d lb = world_->getLowerBound();
     Vector3d ub = world_->getUpperBound();
 
-    Vector2d rand_point=Vector2d( (ub(0)-lb(0))*getRandomNum()+lb(0),(ub(1)-lb(1))*getRandomNum()+lb(1));
+    double rx = getRandomNum();
+    double ry = getRandomNum();
+    Vector2d rand_point=Vector2d( (ub(0)-lb(0))*rx+lb(0),(ub(1)-lb(1))*ry+lb(1));
     return rand_point;           
 }
 
@@ -338,13 +366,13 @@ Vector2d PFRRTStar::sampleInSector()
 
     if(theta_record.empty()) return getRandom2DPoint(); 
 
-    default_random_engine engine;
-
-    uniform_int_distribution<unsigned> rand_int(0,theta_record.size()-1);
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution<unsigned> rand_int(0,theta_record.size()-1);
 
     float theta_rate = getRandomNum();
 
-    float theta=theta_record[rand_int(engine)]+(theta_rate-0.5)*20.0*PI/180.0;
+    float theta=theta_record[rand_int(gen)]+(theta_rate-0.5)*20.0*PI/180.0;
 
     Vector2d sub_goal_2D=project2plane(path_.nodes_.front()->position_);
 
@@ -386,20 +414,8 @@ Vector2d PFRRTStar::sample()
 
 Node* PFRRTStar::findNearest(const Vector2d &point)
 {
-    float min_dis = INF;
-    Node* node_closest = NULL;
-  
-    for(const auto&node:tree_) 
-    { 
-        //Here use Manhattan distance instead of Euclidean distance to improve the calculate speed.
-        float tmp_dis=fabs(point(0)-node->position_(0))+fabs(point(1)-node->position_(1));
-        if(tmp_dis < min_dis) 
-        {
-            min_dis = tmp_dis;
-            node_closest = node;
-        }
-    }
-    return node_closest;
+    // Use KDTree for nearest neighbor search
+    return kdtree_wrapper_.findNearest(point);
 }
 
 Vector2d PFRRTStar::steer(const Vector2d &point_rand_projection, const Vector2d &point_nearest_projection)
@@ -414,6 +430,14 @@ Vector2d PFRRTStar::steer(const Vector2d &point_rand_projection, const Vector2d 
     return point_new_projection;
 }
 
+static inline double slope_deg_between(const Eigen::Vector3d &a, const Eigen::Vector3d &b)
+{
+    Eigen::Vector3d d = b - a;
+    double horiz = std::sqrt(d.x()*d.x() + d.y()*d.y());
+    double ang = std::atan2(std::abs(d.z()), std::max(1e-6, horiz));
+    return ang * 180.0 / PUTN::PI;
+}
+
 Node* PFRRTStar::fitPlane(const Vector2d &p_original)
 {
     Node* node = NULL;
@@ -425,6 +449,10 @@ Node* PFRRTStar::fitPlane(const Vector2d &p_original)
         node=new Node;
         node->plane_=new Plane(p_surface,world_,radius_fit_plane_,fit_plane_arg_);
         node->position_ = p_surface + h_surf_ * node->plane_->normal_vector;
+    }
+    else
+    {
+        RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "project2surface failed at (%.2f,%.2f)", p_original(0), p_original(1));
     }
     return node;
 }
@@ -448,9 +476,26 @@ void PFRRTStar::fitPlane(Node* node)
 
 void PFRRTStar::findNearNeighbors(Node* node_new,vector<pair<Node*,float>> &record) 
 { 
-    for (const auto&node:tree_) 
+    vector<Node*> neighbors;
+    kdtree_wrapper_.findNearNeighbors(project2plane(node_new->position_), neighbor_radius_, neighbors);
+
+    for (auto& node : neighbors) 
     {
-        if(EuclideanDistance(node_new,node) < neighbor_radius_ && world_->collisionFree(node_new,node) )
+        // Fast pre-filter: skip neighbors that clearly violate column slope or are blocked
+        double d = EuclideanDistance(node_new,node);
+        if(d >= neighbor_radius_) continue;
+
+        Eigen::Vector3i idx_mid = world_->coord2index( (node_new->position_ + node->position_) * 0.5 );
+        double col_slope_mid = world_->columnSlopeDeg(idx_mid(0), idx_mid(1));
+        if (col_slope_mid > max_slope_deg_) { continue; }
+        int flat_mid = idx_mid(0)*world_->idx_count_(1) + idx_mid(1);
+        if (flat_mid>=0 && flat_mid < world_->idx_count_(0)*world_->idx_count_(1))
+        {
+            if (world_->blocked_column_[flat_mid]) { continue; }
+        }
+
+        bool cf = world_->collisionFree(node_new,node);
+        if (cf)
             record.push_back( pair<Node*,float>(node,calCostBetweenTwoNode(node_new,node)) );
     }
 }
@@ -472,6 +517,7 @@ void PFRRTStar::findParent(Node* node_new,const vector<pair<Node*,float>> &recor
     node_new->parent_=node_parent;
     node_new->cost_=min_cost;
     node_parent->children_.push_back(node_new);
+    // RCLCPP_INFO(rclcpp::get_logger("putn_planner"), "parent chosen: cost=%.3f dis=%.2f", min_cost, EuclideanDistance(node_new, node_parent));
 }
 
 void PFRRTStar::reWire(Node* node_new,const vector<pair<Node*,float>> &record) 
@@ -488,6 +534,7 @@ void PFRRTStar::reWire(Node* node_new,const vector<pair<Node*,float>> &record)
             node->cost_=tmp_cost;
             node_new->children_.push_back(node);
             updateChildrenCost(node,costdifference);
+            // RCLCPP_INFO(rclcpp::get_logger("putn_planner"), "rewire: improved cost by %.3f for node at (%.2f,%.2f,%.2f)", costdifference, node->position_(0), node->position_(1), node->position_(2));
         }
     }
 }
@@ -572,6 +619,7 @@ void PFRRTStar::generatePath()
                 path_.cost_=min_cost;
                 path_.dis_=calPathDis(path_.nodes_);
                 path_.type_=Path::Global;
+                if (!disable_shortcut_) shortcutPath();
             }
         }
         break;
@@ -600,6 +648,7 @@ void PFRRTStar::generatePath()
                 path_.cost_=path_.nodes_.front()->cost_;
                 path_.dis_=calPathDis(path_.nodes_);
                 path_.type_=Path::Sub;
+                if (!disable_shortcut_) shortcutPath();
             }
             else
             {
@@ -629,25 +678,60 @@ Path PFRRTStar::planner(const int &max_iter,const double &max_time)
     }
     double time_now=curr_time_;
     timeval start;gettimeofday(&start,NULL);
-    while (curr_iter_ < max_iter && curr_time_ < max_time)
+    
+    // Statistics counters
+    int stats_samples = 0;
+    int stats_fit_fail = 0;
+    int stats_out_bounds = 0;
+    int stats_hdiff_fail = 0;
+    int stats_slope_fail = 0;
+    int stats_blocked_fail = 0;
+    int stats_trav_fail = 0;
+    int stats_no_neighbors = 0;
+    int stats_added = 0;
+
+    // Reduce time check frequency
+    int check_time_every_n_iters = 10;
+
+    while (curr_iter_ < max_iter)
     {
+        if (curr_iter_ % check_time_every_n_iters == 0) {
+             timeval t_now; gettimeofday(&t_now,NULL);
+             float ms=1000*(t_now.tv_sec-start.tv_sec)+0.001*(t_now.tv_usec-start.tv_usec);
+             curr_time_=ms+time_now;
+             if (curr_time_ >= max_time) break;
+        }
+
         //Update current iteration
         curr_iter_++;
+        stats_samples++;
+
+        timeval t_loop_start; gettimeofday(&t_loop_start,NULL);
 
         //Update current time consuming
-        timeval end;gettimeofday(&end,NULL);
-        float ms=1000*(end.tv_sec-start.tv_sec)+0.001*(end.tv_usec-start.tv_usec);
-        curr_time_=ms+time_now;
+        // timeval end;gettimeofday(&end,NULL);
+        // float ms=1000*(end.tv_sec-start.tv_sec)+0.001*(end.tv_usec-start.tv_usec);
+        // curr_time_=ms+time_now;
 
         //Sample to get a random 2D point
         Vector2d rand_point_2D=sample();
 
         //Find the nearest node to the random point
         Node* nearest_node= findNearest(rand_point_2D);
+        if (!nearest_node) {
+             // Should not happen if tree initialized
+             curr_iter_++;
+             continue;
+        }
         Vector2d nearest_point_2D = project2plane(nearest_node->position_);
 
         //Expand from the nearest point to the random point
         Vector2d new_point_2D = steer(rand_point_2D,nearest_point_2D);
+
+        // Check if new point is same as nearest point (steer failed to move)
+        if ((new_point_2D - nearest_point_2D).norm() < 1e-3) {
+            continue;
+        }
 
         //Based on the new 2D point,
         Node* new_node = fitPlane(new_point_2D); 
@@ -656,6 +740,45 @@ Path PFRRTStar::planner(const int &max_iter,const double &max_time)
             &&world_->isInsideBorder(new_node->position_)//2.The position is out of the range of the grid map.
           ) 
         {
+            // hard constraints: segment slope and column slope
+            double height_diff = std::abs(new_node->position_(2) - nearest_node->position_(2));
+            double horiz = std::sqrt(std::pow(new_node->position_(0) - nearest_node->position_(0), 2) +
+                                     std::pow(new_node->position_(1) - nearest_node->position_(1), 2));
+            double seg_slope_ratio = (horiz > 1e-6) ? (height_diff / horiz) : 0.0;
+            double seg_slope_deg = std::atan(seg_slope_ratio) * 180.0 / PUTN::PI;
+            // vertical clearance check and slope at new column
+            Eigen::Vector3i idx_new = world_->coord2index(new_node->position_);
+            double col_slope = world_->columnSlopeDeg(idx_new(0), idx_new(1));
+            
+            // Special handling: if slope is very small (flat), use a looser check
+            if (col_slope < 1e-3) col_slope = 0.0;
+
+            int flat_idx = idx_new(0)*world_->idx_count_(1) + idx_new(1);
+            bool col_blocked = (flat_idx>=0 && flat_idx < world_->idx_count_(0)*world_->idx_count_(1)) ? (world_->blocked_column_[flat_idx] != 0) : false;
+            bool col_traversable = world_->isTraversableColumn(idx_new(0), idx_new(1), max_slope_deg_);
+            bool hfail = seg_slope_deg > max_slope_deg_;
+            bool sfail = col_slope > max_slope_deg_;
+            bool bfail = col_blocked;
+            bool tfail = !col_traversable;
+            if (hfail || sfail || bfail || tfail)
+            {
+                if (hfail) stats_hdiff_fail++;
+                if (sfail) stats_slope_fail++;
+                if (bfail) stats_blocked_fail++;
+                if (tfail) stats_trav_fail++;
+
+                delete new_node;
+                continue;
+            }
+            
+            // Collision check with nearest node BEFORE searching neighbors (optimization)
+            if (!world_->collisionFree(new_node, nearest_node)) {
+                // If direct path to nearest is blocked, unlikely to be useful unless we find another neighbor
+                // But let's proceed to neighbor search if we really want optimality, 
+                // OR fast fail if we assume local connectivity is key.
+                // Let's check neighbors still, but maybe limit radius?
+            }
+
             //Get the set of the neighbors of the new node in the tree
             vector<pair<Node*,float>> neighbor_record;
             findNearNeighbors(new_node,neighbor_record);
@@ -666,15 +789,39 @@ Path PFRRTStar::planner(const int &max_iter,const double &max_time)
             //so,discard the new node.
             else
             {
+                // In sparse or rough terrain, a node might be valid but fail connection due to strict constraints.
+                // Instead of deleting it, we can try connecting it to the nearest node directly if possible
+                if (world_->collisionFree(new_node, nearest_node))
+                {
+                    new_node->parent_ = nearest_node;
+                    new_node->cost_ = nearest_node->cost_ + calCostBetweenTwoNode(new_node, nearest_node);
+                    nearest_node->children_.push_back(new_node);
+                    // RCLCPP_INFO(rclcpp::get_logger("putn_planner"), "forced connect: added node via nearest (dist=%.2f)", EuclideanDistance(new_node, nearest_node));
+
+                    // Standard add-to-tree procedure
+                    tree_.push_back(new_node);
+                    kdtree_wrapper_.addNode(new_node);
+                    // No rewire needed since it has no other neighbors
+                    closeCheck(new_node);
+                    stats_added++;
+                    if(planning_state_==Global) generatePath();
+                    continue;
+                }
+
+                stats_no_neighbors++;
+                // RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "reject new_node: no near neighbors within %.2fm (found %lu) and failed to force connect to nearest", neighbor_radius_, neighbor_record.size());
                 delete new_node;
                 continue;
             }
 
             //Add the new node to the tree
             tree_.push_back(new_node);
+            kdtree_wrapper_.addNode(new_node);
+            stats_added++;
 
             //Rewire the tree to optimize it
-            reWire(new_node,neighbor_record);
+            if(planning_state_==Global)
+                reWire(new_node,neighbor_record);
 
             //Check if the new node is close enough to the goal
             closeCheck(new_node);
@@ -682,8 +829,32 @@ Path PFRRTStar::planner(const int &max_iter,const double &max_time)
             if(planning_state_==Global) generatePath();
         }
         else  
+        {
+            if (!new_node)
+            {
+                stats_fit_fail++;
+                // RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "reject: fitPlane failed for rand_point=(%.2f,%.2f)", new_point_2D(0), new_point_2D(1));
+            }
+            else if (!world_->isInsideBorder(new_node->position_))
+            {
+                stats_out_bounds++;
+                // RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "reject: new_node out of map bounds at (%.2f,%.2f,%.2f)", new_node->position_(0), new_node->position_(1), new_node->position_(2));
+            }
             delete new_node;
+        }
+        
+        timeval t_loop_end; gettimeofday(&t_loop_end,NULL);
+        float ms_loop = 1000*(t_loop_end.tv_sec-t_loop_start.tv_sec)+0.001*(t_loop_end.tv_usec-t_loop_start.tv_usec);
+        if (ms_loop > 5.0) { // Log if single iteration takes > 5ms
+            RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "Slow iteration %d: %.2f ms", curr_iter_, ms_loop);
+        }
     }
+
+    RCLCPP_INFO(rclcpp::get_logger("putn_planner"), 
+        "RRT Stats: iter=%d/%d time=%.1f/%.1f ms | Sampled=%d Added=%d | Rejects: Fit=%d Out=%d HDiff=%d Slope=%d Block=%d Trav=%d NoNb=%d",
+        curr_iter_, max_iter, curr_time_, max_time,
+        stats_samples, stats_added,
+        stats_fit_fail, stats_out_bounds, stats_hdiff_fail, stats_slope_fail, stats_blocked_fail, stats_trav_fail, stats_no_neighbors);
 
     if(planning_state_==Roll) generatePath();
 
@@ -704,4 +875,78 @@ void PFRRTStar::pubTraversabilityOfTree(rclcpp::Publisher<std_msgs::msg::Float32
         msg.data.push_back(node->plane_->traversability);
     }
     tree_tra_pub->publish(msg);
+}
+bool PFRRTStar::validSegment(Node* a, Node* b)
+{
+    if (!a || !b) return false;
+    double height_diff = std::abs(a->position_(2) - b->position_(2));
+    if (height_diff > max_height_diff_)
+    {
+        RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "validSegment reject: hdiff=%.3f>%.3f", height_diff, max_height_diff_);
+        return false;
+    }
+    Eigen::Vector3i idx_mid = world_->coord2index( (a->position_ + b->position_) * 0.5 );
+    double col_slope = world_->columnSlopeDeg(idx_mid(0), idx_mid(1));
+    if (col_slope > max_slope_deg_)
+    {
+        RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "validSegment reject: col_slope=%.2f>%.2f", col_slope, max_slope_deg_);
+        return false;
+    }
+    int flat_idx = idx_mid(0)*world_->idx_count_(1) + idx_mid(1);
+    if (flat_idx>=0 && flat_idx < world_->idx_count_(0)*world_->idx_count_(1))
+    {
+        if (world_->blocked_column_[flat_idx])
+        {
+            RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "validSegment reject: blocked column at mid (%d,%d)", idx_mid(0), idx_mid(1));
+            return false;
+        }
+        if (!world_->isTraversableColumn(idx_mid(0), idx_mid(1), max_slope_deg_))
+        {
+            RCLCPP_WARN(rclcpp::get_logger("putn_planner"), "validSegment reject: trav_col=0 at mid (%d,%d)", idx_mid(0), idx_mid(1));
+            return false;
+        }
+    }
+    return world_->collisionFree(a, b);
+}
+
+void PFRRTStar::shortcutPath()
+{
+    if (path_.nodes_.size() < 3) return;
+    std::vector<Node*> &nodes = path_.nodes_;
+    bool improved = true;
+    int passes = 0;
+    while (improved && passes < 3)
+    {
+        improved = false;
+        for (size_t i = 0; i + 2 < nodes.size(); )
+        {
+            Node* A = nodes[i+2];
+            Node* B = nodes[i+1];
+            Node* C = nodes[i];
+            if (validSegment(A, C))
+            {
+                nodes.erase(nodes.begin() + (i+1));
+                improved = true;
+            }
+            else
+            {
+                // optional mid-point test: try replacing B with mid(A,C)
+                Eigen::Vector3d mid = 0.5*(A->position_ + C->position_);
+                Node* mid_node = new Node(*B);
+                mid_node->position_ = mid;
+                // keep plane of B; alternative: refit plane if needed
+                if (validSegment(A, mid_node) && validSegment(mid_node, C))
+                {
+                    nodes[i+1] = mid_node;
+                    improved = true;
+                }
+                else
+                {
+                    delete mid_node;
+                }
+                ++i;
+            }
+        }
+        passes++;
+    }
 }

@@ -3,6 +3,7 @@
 
 #include <utility>
 #include "PUTN_vis.h"
+#include "PUTN_kdtree.h"
 #include <rclcpp/rclcpp.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
@@ -69,6 +70,8 @@ public:
     void setGoalBiased(const double &goal_biased){goal_biased_=goal_biased;}
 
     void setNeighborRadius(const double &neighbor_radius){neighbor_radius_=neighbor_radius;}
+    void setMaxHeightDiff(const double &max_height_diff){max_height_diff_=max_height_diff;}
+    void setMaxSlopeDeg(const double &max_slope_deg){max_slope_deg_=max_slope_deg;}
 
     Node* origin(){return node_origin_;}
     Node* target(){return node_target_;}
@@ -121,9 +124,16 @@ protected:
     //radius used in function FindNeighbors
     float neighbor_radius_=1.0f;
 
+    // hard constraints
+    double max_height_diff_=0.2;
+    double max_slope_deg_=15.0;
+
+
     PlanningState planning_state_;
 
     World* world_;
+
+    KDTreeWrapper kdtree_wrapper_;
 
     //used in function generatePath
     std::vector<std::pair<Node*,float>> close_check_record_;
@@ -200,6 +210,15 @@ protected:
     float calPathDis(const std::vector<Node*> &nodes);
 
     void pubTraversabilityOfTree(rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr tree_tra_pub);
+
+    bool validSegment(Node* a, Node* b);
+    void shortcutPath();
+
+    // disable path backtracking/shortcutting when true
+    bool disable_shortcut_ = false;
+
+public:
+    void setDisableShortcut(bool v){ disable_shortcut_ = v; }
 };
 }
 }

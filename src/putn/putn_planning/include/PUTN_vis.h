@@ -21,6 +21,7 @@ void visSurf(const std::vector<Node*>& solution, rclcpp::Publisher<sensor_msgs::
 void visOriginAndGoal(const std::vector<Node*>& pts, rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr origin_and_goal_vis_pub);
 void visPath(const std::vector<Node*>& solution, rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr path_vis_pub);
 void visTree(const std::vector<Node*>& tree, rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr tree_vis_pub);
+void visMapTraversability(World* world, rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr trav_vis_pub, double max_slope_deg);
 }
 
 }
