@@ -65,6 +65,9 @@ class PCDPublisher(Node):
             self.get_logger().error(f'Invalid pcd_path: {self.pcd_path}')
 
         if self.points is not None and self.points.size > 0:
+            # Shift map down by 1.0m to make ground below z=0
+            self.points[:, 2] -= 0.5
+            
             if self.repeat_rate <= 0.0:
                 self.repeat_rate = 1.0
             self.timer = self.create_timer(self.repeat_rate, self.publish_once)

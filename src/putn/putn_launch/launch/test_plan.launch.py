@@ -34,18 +34,18 @@ def generate_launch_description():
         ],
     )
 
-    gpr_path = Node(
-        package='gpr',
-        executable='gpr_path',
-        name='gpr_path',
-        output='screen',
-        emulate_tty=True,
-        remappings=[
-            ('/global_planning_node/global_path', '/global_path'),
-            ('/global_planning_node/tree_tra', '/tree_tra'),
-            ('/surf_predict_pub', '/surf_predict_pub'),
-        ],
-    )
+    # gpr_path = Node(
+    #     package='gpr',
+    #     executable='gpr_path',
+    #     name='gpr_path',
+    #     output='screen',
+    #     emulate_tty=True,
+    #     remappings=[
+    #         ('/global_planning_node/global_path', '/global_path'),
+    #         ('/global_planning_node/tree_tra', '/tree_tra'),
+    #         ('/surf_predict_pub', '/surf_predict_pub'),
+    #     ],
+    # )
 
     waypoint_gen = Node(
         package='waypoint_generator',
@@ -79,10 +79,25 @@ def generate_launch_description():
 
     fake_odom = Node(
         package='local_planner',
-        executable='fake_odom_publisher.py',
-        name='fake_odom',
+        executable='simple_sim.py',
+        name='simple_sim',
         output='screen',
-        parameters=[{'frame_id': 'world'}, {'child_frame_id': 'base_link'}, {'x': 0.0}, {'y': 0.0}, {'z': 0.0}, {'yaw': 0.0}, {'rate': 30.0}],
+        parameters=[{'frame_id': 'world'}, {'child_frame_id': 'base_link'}, {'x': 0.0}, {'y': 0.0}, {'z': 0.0}, {'yaw': 0.0}, {'rate': 50.0}],
+    )
+
+    local_planner = Node(
+        package='local_planner',
+        executable='local_planner.py',
+        name='local_planner',
+        output='screen',
+    )
+
+    controller = Node(
+        package='local_planner',
+        executable='controller.py',
+        name='controller',
+        output='screen',
+        parameters=[{'control_mode': 'auto'}],
     )
 
     rviz2 = Node(
@@ -102,8 +117,10 @@ def generate_launch_description():
         world_to_map,
         pcd_publisher,
         fake_odom,
+        local_planner,
+        controller,
         waypoint_gen,
         global_planning,
-        gpr_path,
+        # gpr_path,
         rviz2,
     ])

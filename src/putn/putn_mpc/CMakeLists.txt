@@ -10,7 +10,7 @@ install(PROGRAMS
   scripts/local_planner.py
   scripts/controller.py
   scripts/pcd_publisher.py
-  scripts/fake_odom_publisher.py
+  scripts/simple_sim.py
   DESTINATION lib/${PROJECT_NAME})
 
 install(FILES

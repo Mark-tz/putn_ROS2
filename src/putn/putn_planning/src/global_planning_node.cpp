@@ -181,7 +181,7 @@ void pubInterpolatedPath(const vector<Node*>& solution, rclcpp::Publisher<std_ms
   (*path_interpolation_pub)->publish(msg);
   
   if (!solution.empty()) {
-    // ROS_INFO("Published interpolated path with %zu points. Triggering potential downstream effects.", msg.data.size()/3);
+    ROS_INFO("Published interpolated path with %zu points. Triggering potential downstream effects.", msg.data.size()/3);
   }
 }
 
@@ -217,6 +217,20 @@ void findSolution()
     // Visualization of "tree" (visited nodes)
     std::vector<Node*> visited = astar_planner->getVisitedNodes();
     visTree(visited, tree_vis_pub);
+    
+    // Publish tree_tra for GPR or local planner compatibility
+    // Format: [x, y, z, z_true] per node
+    if (tree_tra_pub) {
+        std_msgs::msg::Float32MultiArray tree_msg;
+        tree_msg.data.reserve(visited.size() * 4);
+        for (const auto* n : visited) {
+            tree_msg.data.push_back(n->position_(0));
+            tree_msg.data.push_back(n->position_(1));
+            tree_msg.data.push_back(n->position_(2));
+            tree_msg.data.push_back(n->position_(2)); // z_true is same as z for A*
+        }
+        tree_tra_pub->publish(tree_msg);
+    }
 
     if (!solution.nodes_.empty())
       ROS_INFO_THROTTLE(50, "Get a global path!");
@@ -450,8 +464,8 @@ int main(int argc, char** argv)
       catch (const tf2::TransformException& ex)
       {
         tf_lookup_tries++;
-        if ((tf_lookup_tries % 50) == 0)
-          ROS_WARN("TF lookup retrying: tries=%d", tf_lookup_tries);
+        // if ((tf_lookup_tries % 50) == 0)
+          // ROS_WARN("TF lookup retrying: tries=%d", tf_lookup_tries);
         continue;
       }
     }

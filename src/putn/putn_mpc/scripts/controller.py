@@ -165,11 +165,11 @@ class Controller(Node):
             data = np.array([0.0, 0.0])
         elif key == 'i':
             self.is_manual = False
-            self.get_logger().info('controller: switch to auto mode')
+            # self.get_logger().info('controller: switch to auto mode')
             return True
         elif key == 'm':
             self.is_manual = True
-            self.get_logger().info('controller: switch to manual mode')
+            # self.get_logger().info('controller: switch to manual mode')
             return True
         elif (key == '\x03'):
             return False
@@ -183,7 +183,8 @@ class Controller(Node):
             self.local_plan[i, 1] = msg.data[1+2*i]
         self.have_plan = 1
         try:
-            self.get_logger().info(f"controller: received local_plan first=({self.local_plan[0,0]:.3f},{self.local_plan[0,1]:.3f})")
+            # self.get_logger().info(f"controller: received local_plan first=({self.local_plan[0,0]:.3f},{self.local_plan[0,1]:.3f})")
+            pass
         except Exception:
             pass
 
@@ -194,7 +195,8 @@ class Controller(Node):
                 self._health_count = 0
             self._health_count += 1
             if self._health_count % 50 == 0:
-                self.get_logger().info(f"controller: curr_state=({self.curr_state[0]:.3f},{self.curr_state[1]:.3f},{self.curr_state[3]:.3f}), cmd=({self.control_cmd.linear.x:.3f},{self.control_cmd.angular.z:.3f})")
+                # self.get_logger().info(f"controller: curr_state=({self.curr_state[0]:.3f},{self.curr_state[1]:.3f},{self.curr_state[3]:.3f}), cmd=({self.control_cmd.linear.x:.3f},{self.control_cmd.angular.z:.3f})")
+                pass
         except Exception:
             pass
 

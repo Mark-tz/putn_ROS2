@@ -2,7 +2,7 @@ global_planning_node:
   ros__parameters:
     "map/resolution_xy": 0.15
     "map/resolution_z": 0.015
-    "map/z_min": -0.5
+    "map/z_min": -1.0
     "map/z_max": 1.0
     "planning/step_size": 0.1
     "planning/h_surf_car": 0.3

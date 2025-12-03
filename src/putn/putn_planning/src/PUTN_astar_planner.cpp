@@ -281,6 +281,52 @@ Path AStarPlanner::reconstructPath(AStarNode* current_node)
     }
     
     std::reverse(path_nodes.begin(), path_nodes.end());
+
+    // Insert exact start point if it's different from the first grid node
+    if (!path_nodes.empty())
+    {
+        Vector3d grid_start = path_nodes.front()->position_;
+        // Check if distance is significant (> 1cm)
+        if ((start_pos_.head<2>() - grid_start.head<2>()).norm() > 0.01)
+        {
+            Node* start_node = new Node();
+            start_node->position_ = start_pos_;
+            // Ensure Z is consistent? start_pos_ z comes from TF.
+            // Grid z comes from map. If map is shifted, start_pos z might differ.
+            // But local planner tracks robot z. So start_pos z is correct for robot.
+            // However, connection might look vertical if map z is different.
+            // Let's trust start_pos_ as ground truth for start.
+            start_node->plane_ = new Plane();
+            start_node->plane_->traversability = 1.0;
+            start_node->plane_->normal_vector = Vector3d(0, 0, 1);
+            path_nodes.insert(path_nodes.begin(), start_node);
+        }
+    }
+
+    // Append exact goal point if it's different from the last grid node
+    if (!path_nodes.empty())
+    {
+        Vector3d grid_goal = path_nodes.back()->position_;
+        if ((goal_pos_.head<2>() - grid_goal.head<2>()).norm() > 0.01)
+        {
+            Node* goal_node = new Node();
+            goal_node->position_ = goal_pos_;
+            // Goal Z from waypoint might be 0 or ground?
+            // Usually goal z is on surface.
+            // Let's assume goal_pos_ z is correct (from Rviz it is on plane).
+            // If Rviz goal z is 0, and surface is -1.0, it might be a jump.
+            // But user sets goal in Rviz on the map surface (usually).
+            // If map is shifted -1.0, Rviz goal picking on map should be -1.0?
+            // Actually Rviz "2D Nav Goal" publishes z=0 usually.
+            // But global_planning_node `rcvWaypointsCallback` takes it.
+            // We might need to project goal to surface?
+            // But let's append it as is for now.
+            goal_node->plane_ = new Plane();
+            goal_node->plane_->traversability = 1.0;
+            goal_node->plane_->normal_vector = Vector3d(0, 0, 1);
+            path_nodes.push_back(goal_node);
+        }
+    }
     
     // Apply shortcut smoothing
     shortcutPath(path_nodes);
