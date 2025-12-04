@@ -138,7 +138,7 @@ class Local_Planner(Node):
         while dth < -np.pi: dth += 2*np.pi
         
         target_yaw = self.goal_state[0, 3]
-        self.get_logger().info(f"Curr: ({self.curr_state[0]:.2f}, {self.curr_state[1]:.2f}, {self.curr_state[2]:.2f}) Goal: ({self.goal_state[0,0]:.2f}, {self.goal_state[0,1]:.2f}, {target_yaw:.2f}) Error(Goal-Curr): {dth:.3f} rad")
+        # self.get_logger().info(f"Curr: ({self.curr_state[0]:.2f}, {self.curr_state[1]:.2f}, {self.curr_state[2]:.2f}) Goal: ({self.goal_state[0,0]:.2f}, {self.goal_state[0,1]:.2f}, {target_yaw:.2f}) Error(Goal-Curr): {dth:.3f} rad")
 
         for i in range(self.N):
             this_pose_stamped = PoseStamped()

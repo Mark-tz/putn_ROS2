@@ -107,6 +107,39 @@ def generate_launch_description():
         output='screen'
     )
 
+    router_tsp = Node(
+        package='tz_routing',
+        executable='tz_tsp',
+        name='router_tsp',
+        output='screen'
+    )
+
+    mission_executor = Node(
+        package='tz_routing',
+        executable='mission_executor',
+        name='mission_executor',
+        output='screen',
+        parameters=[
+            {'work_offset_x': -0.4},
+            {'work_offset_y': 0.0}
+        ]
+    )
+
+    rosbridge_node = Node(
+        package='rosbridge_server',
+        executable='rosbridge_websocket',
+        name='rosbridge_websocket',
+        output='screen',
+        parameters=[{'port': 9090}]
+    )
+
+    rosapi_node = Node(
+        package='rosapi',
+        executable='rosapi_node',
+        name='rosapi_node',
+        output='screen'
+    )
+
     return LaunchDescription([
         pcd_path_arg,
         crop_enabled_arg,
@@ -123,4 +156,8 @@ def generate_launch_description():
         global_planning,
         # gpr_path,
         rviz2,
+        rosbridge_node,
+        rosapi_node,
+        router_tsp,
+        mission_executor,
     ])
